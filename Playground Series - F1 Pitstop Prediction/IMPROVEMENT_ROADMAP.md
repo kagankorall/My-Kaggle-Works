@@ -1,240 +1,105 @@
-# F1 Pit Stop Prediction — Improvement Roadmap
+Önemli ön düzeltme — Compound aslında atılmadı
+Bölüm 8.1'de drop_from_X = ['id', 'Driver', 'Compound', 'Race', 'PitNextLap', 'Driver_enc', 'Race_enc'] şu anki kullanımı: ham string Compound atıldı ama formula1_pit_stop_prediction.ipynb Bölüm 7.6'da üretilen Compound_enc (label-encoded) modelde var — features_base listesine giriyor. Yani sinyal mevcut, sadece ordinal kodlanmış (SOFT=2, HARD=0, vb.) — bu da yanlış bir sıralama varsayımı yapıyor. Önerin yine de geçerli: OHE bu varsayımı kaldırır.
 
-Bu dosya, ensemble/Optuna dışında AUC kazancı sağlayabilecek alternatifleri öncelik sırasıyla listeler.
+1. Compound — OHE'ye geç
+formula1_pit_stop_prediction.ipynb Bölüm 7.6'da Compound_enc üretimini kaldırıp yerine OHE:
 
----
 
-## Öncelik Tablosu
+# Bölüm 7.6 yerine
+compound_dummies = pd.get_dummies(all_df['Compound'], prefix='Compound').astype(int)
+all_df = pd.concat([all_df, compound_dummies], axis=1)
+Bölüm 8.1'de drop_from_X listesinden Compound_enc'i çıkar, OHE kolonları otomatik feature listesine düşer. 5 ek binary kolon — kardinalite çok düşük, regülarizasyon etkisi yok.
 
-| # | Adım | Beklenen AUC Kazancı | Efor | Durum |
-|---|------|---------------------|------|-------|
-| 1 | GroupKFold (validation fix) | gerçek skoru görmek | düşük | ⬜ |
-| 2 | Rolling / lag features | +0.003–0.010 | orta | ⬜ |
-| 3 | 2023 regime isolation | +0.002–0.005 | orta | ⬜ |
-| 4 | Pseudo-labeling | +0.002–0.005 | düşük | ⬜ |
-| 5 | Stacking (meta-model) | +0.001–0.003 | orta | ⬜ |
-| 6 | CatBoost ekleme | +0.001–0.002 | düşük | ⬜ |
-| 7 | Optuna hyperparameter search | +0.001–0.002 | yüksek | ⬜ |
-| 8 | Ensemble blend | +0.001–0.002 | düşük | ✅ |
+2. CatBoost'u doğru beslemek + ensemble
+Yeni Bölüm 8.9 olarak ekle (LGBM 10-seed bittikten sonra, blend için):
 
----
 
-## 1. Validation Stratejisi — GroupKFold
+from catboost import CatBoostClassifier
 
-**Problem:** StratifiedKFold aynı yarıştan ardışık lap'ları hem train hem validation'a koyar.  
-Bu, OOF skorunu gerçekten iyi gösterir ama aslında "cheating" yapar — model aynı yarışın başka lap'larını görmüş olur.
+cat_features = ['Driver', 'Race', 'Compound']  # ham string
+X_cb       = train_fe[features_base + cat_features].drop(columns=['Compound_enc']).copy()
+X_cb_test  = test_fe[features_base + cat_features].drop(columns=['Compound_enc']).copy()
+# Driver/Race ham string olduğu için str_train/str_test'ten alıp birleştirmek gerekir
 
-**Çözüm:**
-```python
-from sklearn.model_selection import GroupKFold
+cb_oof, cb_test = np.zeros(len(X_cb)), np.zeros(len(X_cb_test))
+for fold, (tr_idx, val_idx) in enumerate(skf.split(X_cb, y), 1):
+    model = CatBoostClassifier(
+        iterations=3000, learning_rate=0.03, depth=8,
+        l2_leaf_reg=5, eval_metric='AUC',
+        cat_features=cat_features, random_state=RANDOM_STATE, verbose=0
+    )
+    model.fit(X_cb.iloc[tr_idx], y.iloc[tr_idx],
+              eval_set=(X_cb.iloc[val_idx], y.iloc[val_idx]),
+              early_stopping_rounds=100)
+    cb_oof[val_idx] = model.predict_proba(X_cb.iloc[val_idx])[:, 1]
+    cb_test += model.predict_proba(X_cb_test)[:, 1] / skf.n_splits
 
-gkf = GroupKFold(n_splits=5)
-groups = train_fe['Race'].astype(str) + '_' + train_fe['Year'].astype(str)
+# Rank-blend (LB'de daha stabil)
+from scipy.stats import rankdata
+blend_test = 0.6 * rankdata(test_preds_seedavg) + 0.4 * rankdata(cb_test)
+blend_test /= len(blend_test)
+Önemli: korelasyonu önce OOF'ta ölçmen gerekir (np.corrcoef(oof_seedavg, cb_oof)); 0.95'in altıysa diversity gerçek, üstüyse blend yine LB'ye yansımayabilir.
 
-for fold, (tr_idx, val_idx) in enumerate(gkf.split(X_base, y, groups=groups), 1):
-    ...
-```
+3. Hiperparametre regülasyonu
+Bölüm 8.2'de lgb_params güncellemesi:
 
-**Neden önemli:** Validation stratejisi yanlışsa Optuna da yanlış optimize eder. Bu adım diğer her şeyin temelini oluşturur.
 
----
+lgb_params = {
+    'objective': 'binary',
+    'metric': 'auc',
+    'learning_rate': 0.02,         # 0.05 → 0.02
+    'num_leaves': 63,              # 127 → 63
+    'feature_fraction': 0.8,
+    'bagging_fraction': 0.8,
+    'bagging_freq': 5,
+    'min_data_in_leaf': 100,       # 20 → 100
+    'lambda_l1': 0.1,
+    'lambda_l2': 0.5,              # 0.1 → 0.5 (hafif artır)
+    'verbose': -1,
+    'random_state': RANDOM_STATE,
+    'n_jobs': -1,
+}
+# ve
+model = lgb.LGBMClassifier(**lgb_params, n_estimators=5000)  # 2000 → 5000
+Maliyet: lr yarıya inince eğitim ~2-3x uzar, 10-seed × 5-fold için ~60-70 dk. Tek seedde önce dene, OOF AUC düşmüyor/artıyorsa 10-seed'e geç.
 
-## 2. Rolling / Lag Features
+4. Cross-sectional (lap-içi göreceli) feature'lar
+Bölüm 7.5 (interactions) altına:
 
-**Fikir:** Bir sürücünün son 3–5 lap'ındaki performans trendini yakalamak.  
-Mevcut `LapTime_Delta` tek bir lap'a bakıyor; rolling ortalama çok daha stabil bir degradasyon sinyali verir.
 
-```python
-# Sürücü + yarış bazında sıralama gerekiyor
-all_df = all_df.sort_values(['Race', 'Year', 'Driver', 'LapNumber'])
+lap_grp = all_df.groupby(['Race', 'Year', 'LapNumber'])
 
-grp = all_df.groupby(['Race', 'Year', 'Driver'])
-
-# Son 3 ve 5 lap'ın ortalama lap süresi
-all_df['LapTime_Roll3'] = grp['LapTime (s)'].transform(lambda x: x.shift(1).rolling(3).mean())
-all_df['LapTime_Roll5'] = grp['LapTime (s)'].transform(lambda x: x.shift(1).rolling(5).mean())
-
-# Mevcut lap ile rolling ortalama farkı → anlık yavaşlama
-all_df['LapTime_vs_Roll5'] = all_df['LapTime (s)'] - all_df['LapTime_Roll5']
-
-# Tyre life artış hızı (genelde 1, ama safety car altında sıçrar)
-all_df['TyreLife_Delta'] = grp['TyreLife'].transform(lambda x: x.diff())
-
-# Stint içinde kaçıncı lap (0-indexed)
-all_df['LapInStint'] = grp['LapNumber'].transform(lambda x: x - x.min())
-```
-
-**Not:** `.shift(1)` kritik — hedefe bakan leak'i önler (gelecek lap bilgisi kullanma).
-
----
-
-## 3. 2023 Regime Isolation
-
-**Problem:** 2023 pit rate'i ~%1 vs diğer yıllar ~%28. Şu an `is_2023` flag'i var ama model hâlâ tüm veriyi aynı anda öğreniyor.
-
-### Seçenek A — Yıl bazında ayrı model
-```python
-mask_2023 = train_fe['Year'] == 2023
-
-model_2023    = train_and_predict(train_fe[mask_2023], ...)
-model_non2023 = train_and_predict(train_fe[~mask_2023], ...)
-
-# Test için yıla göre yönlendir
-test_2023_preds    = model_2023.predict(test_fe[test_fe['Year'] == 2023])
-test_non2023_preds = model_non2023.predict(test_fe[test_fe['Year'] != 2023])
-```
-
-### Seçenek B — Sample weight ile cezalandır
-```python
-# 2023 lap'larına düşük ağırlık ver, modelin onlara "güvenmesini" azalt
-sample_weights = np.where(train_fe['Year'] == 2023, 0.3, 1.0)
-
-model.fit(X_tr, y_tr, sample_weight=sample_weights[tr_idx], ...)
-```
-
-**Öneri:** Önce Seçenek B ile hızlı test et; kazanç varsa Seçenek A'ya geç.
-
----
-
-## 4. Pseudo-Labeling
-
-**Fikir:** Test setindeki yüksek güvenlik tahminleri büyük ihtimalle doğrudur — bunları eğitim setine ekle.
-
-```python
-# Ensemble tahminlerini kullan
-test_fe['PitNextLap_pseudo'] = ensemble_test_preds
-
-# Çok emin olduğumuz tahminleri seç
-high_conf = test_fe[
-    (ensemble_test_preds > 0.95) | (ensemble_test_preds < 0.05)
-].copy()
-high_conf['PitNextLap'] = (high_conf['PitNextLap_pseudo'] > 0.5).astype(int)
-
-# Genişletilmiş train seti
-train_pseudo = pd.concat([train_fe, high_conf], ignore_index=True)
-
-# Aynı CV loop'unu train_pseudo üzerinde çalıştır
-```
-
-**Dikkat:** Pseudo-labeling iteratif uygulanabilir (1. turda %95 eşik, 2. turda %90 gibi).  
-Genellikle yarışmanın 2–3. haftasında yapılır — çünkü önce iyi bir base model gerekir.
-
----
-
-## 5. Stacking (Meta-Model)
-
-**Blend vs Stacking farkı:**
-- Blend: `0.508 * lgbm_oof + 0.492 * xgb_oof` → sabit ağırlık
-- Stack: Her satır için farklı ağırlık — bir Logistic Regression veya Ridge öğrenir
-
-```python
-from sklearn.linear_model import LogisticRegression
-
-# Level-1 OOF'ları birleştir
-oof_stack = np.column_stack([lgbm_oof, xgb_oof])     # shape: (N, 2)
-test_stack = np.column_stack([test_preds, xgb_test_preds])
-
-# Level-2 meta-model (kendi içinde CV ile fit et)
-meta = LogisticRegression(C=1.0)
-meta.fit(oof_stack, y)
-
-final_preds = meta.predict_proba(test_stack)[:, 1]
-print(f'Stack OOF AUC: {roc_auc_score(y, meta.predict_proba(oof_stack)[:, 1]):.5f}')
-```
-
-**Daha güçlü meta-model:** LightGBM ile stacking (özellikle 3+ base model varsa).
-
----
-
-## 6. CatBoost Ekleme
-
-CatBoost'un farkı: kategorik sütunları (`Driver`, `Race`, `Compound`) string olarak alır, kendi içinde ordered target encoding uygular — fold içi manual TE'ye gerek kalmaz.
-
-```python
-from catboost import CatBoostClassifier, Pool
-
-cat_features = ['Driver', 'Race', 'Compound']
-
-# CatBoost string kolonları olduğu gibi alır
-X_cat = train_fe[features_base_str + cat_features]  # str kolonları koru
-
-model = CatBoostClassifier(
-    iterations=3000,
-    learning_rate=0.05,
-    depth=6,
-    eval_metric='AUC',
-    random_seed=RANDOM_STATE,
-    verbose=False,
+all_df['TyreLife_pct_vs_lap_mean'] = (
+    all_df['TyreLife_pct'] / lap_grp['TyreLife_pct'].transform('mean')
 )
-model.fit(
-    Pool(X_tr, y_tr, cat_features=cat_features),
-    eval_set=Pool(X_val, y_val, cat_features=cat_features),
-    early_stopping_rounds=50,
-)
-```
+all_df['TyreLife_rank_in_lap']    = lap_grp['TyreLife'].rank(pct=True)
+all_df['CumDeg_rank_in_lap']      = lap_grp['Cumulative_Degradation'].rank(pct=True)
+all_df['LapTime_rank_in_lap']     = lap_grp['LapTime (s)'].rank(pct=True)
+all_df['Position_vs_grid_size']   = all_df['Position'] / lap_grp['Position'].transform('max')
+Bunlar undercut/overcut sinyali. Time-series rolling overfit ettiyse, cross-sectional rank'ler genelde daha güvenli — leak riski yok (aynı turdaki diğer sürücüler test setinde de gözlemleniyor).
 
-**Stack'e ekleme:** `[lgbm_oof, xgb_oof, cat_oof]` → 3 kolonlu meta-model.
+5. Validation — Public/Private LB ikili strateji
+Forumdan bölünme stratejisini kontrol etmen şart, ama koda iki sigorta ekleyebiliriz:
 
----
 
-## 7. Alan Spesifik Özellikler (Domain FE)
+# A) Mevcut: StratifiedKFold ile en iyi best_iter ortalaması belirle
+mean_best_iter = int(np.mean([m.best_iteration_ for m in fold_models]))
 
-Bu özellikler F1 domain bilgisine dayanır ve başka kagglerların çoğu yazmaz:
+# B) Sigorta submission: GroupKFold + sabit iter (full-train final model)
+gkf = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
+group_oof = np.zeros(len(X_base))
+for tr_idx, val_idx in gkf.split(X_base, y, groups):
+    # ... aynı pipeline ama n_estimators=mean_best_iter, early_stopping YOK
+    pass
+group_auc = roc_auc_score(y, group_oof)
+print(f'GroupKFold OOF AUC: {group_auc:.5f}  (Private LB sigortası)')
+İki submission hazırla: submission_skf.csv (mevcut, Public'e oynak) + submission_groupcv.csv (Private sigortası). Kaggle 2 final submission seçtiriyor — birini her stratejiye ayır.
 
-```python
-# Aynı yarışta sürücünün pit geçmişi
-grp_driver_race = all_df.groupby(['Race', 'Year', 'Driver'])
-
-# Şimdiye kadar kaç pit yaptı?
-all_df['CumulativePits'] = grp_driver_race['PitStop'].transform('cumsum')
-
-# Son pit'ten bu yana kaç lap geçti?
-all_df['LapsSinceLastPit'] = all_df.groupby(
-    ['Race', 'Year', 'Driver', 'Stint']
-)['LapNumber'].transform(lambda x: x - x.min())
-
-# Yarışta toplam beklenen pit sayısı (compound'a göre kaba tahmin)
-compound_avg_stints = train_fe.groupby('Compound')['Stint'].max().to_dict()
-all_df['ExpectedTotalPits'] = all_df['Compound'].map(compound_avg_stints) - 1
-
-# Pit yapmak için kalan "bütçe"
-all_df['PitsRemaining_estimate'] = (all_df['ExpectedTotalPits']
-                                    - all_df['CumulativePits']).clip(0)
-```
-
----
-
-## 8. Probability Calibration
-
-ROC-AUC metriğinde etkisi sınırlı ama submission kalitesini artırır.
-
-```python
-from sklearn.calibration import CalibratedClassifierCV, calibration_curve
-
-# OOF üzerinde kalibrasyon eğrisi çiz
-frac_pos, mean_pred = calibration_curve(y, blend_oof, n_bins=20)
-
-fig, ax = plt.subplots(figsize=(7, 5))
-ax.plot(mean_pred, frac_pos, marker='o', label='model')
-ax.plot([0, 1], [0, 1], 'k--', label='perfect')
-ax.set_title('Calibration Curve')
-ax.legend()
-plt.show()
-
-# Isotonic regression ile kalibre et
-from sklearn.isotonic import IsotonicRegression
-iso = IsotonicRegression(out_of_bounds='clip')
-iso.fit(blend_oof, y)
-calibrated_test_preds = iso.predict(ensemble_test_preds)
-```
-
----
-
-## Önerilen Sıradaki Adım
-
-```
-1. GroupKFold uygula → gerçek validation skoru nedir bak
-2. Rolling features (LapTime_Roll3/5, LapInStint) ekle → en yüksek ROI
-3. Pseudo-labeling dene → düşük efor, ciddi kazanç olabilir
-4. CatBoost ekle + 3'lü stack
-```
+Hangi sırayla denemeni öneririm
+Sıra	Aksiyon	Risk	Beklenen kazanç
+1	Compound OHE	Düşük	Ufak ama bedava
+2	Cross-sectional ranks (madde 4)	Düşük-orta	Orta — undercut sinyali
+3	Hiperparam reg. (madde 3)	Düşük	OOF/LB gap'i küçültür
+4	CatBoost + rank-blend (madde 2)	Orta	OOF korelasyonu < 0.95 ise yüksek
+5	Çift-validasyon submission (madde 5)	Sıfır	Private LB sigortası
+Hangisinden başlamamı istersin? Ben madde 1+4 ikilisinin en hızlı geri dönüş vereceğini düşünüyorum (kod değişikliği küçük, training maliyeti aynı). 2 ve 3 birlikte denenmeli — yeni feature + daha az leaves = doğal tamamlayıcı. 5 ise sadece notebook'un sonuna ek hücre.
