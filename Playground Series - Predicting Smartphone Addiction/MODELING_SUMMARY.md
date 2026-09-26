@@ -3,7 +3,8 @@
 Working log for the competition. Records what was tried, what it measured, and what it cost —
 including the things that did not work and the method mistakes that cost a round each.
 
-**Current best: LB 0.96984** (round 7). For reference, a strong public solution scored 0.96891.
+**Current best: LB 0.96987** — from a submission the log failed to record (see §1). The best
+*attributable* score is **0.96986** (round 9). For reference, a strong public solution scored 0.96891.
 
 - Task: binary classification of `addicted_label`, scored with **ROC-AUC**
 - Data: 691,369 train / 296,302 test rows, 9 numerical + 3 categorical features
@@ -22,16 +23,34 @@ including the things that did not work and the method mistakes that cost a round
 | 3 | Constraint imputation + exact-value target encoding + 10-fold | 0.968456 | 0.96963 | **+0.00316** |
 | 4 | `TE_SKIP` + pairwise TE, shipped together | — | 0.96743 | **−0.00220** |
 | 5–6 | CV-only ablation rounds, no submissions spent | — | — | — |
-| 7 | + frequency encoding | — | **0.96984** | +0.00021 |
+| 7 | + frequency encoding | — | 0.96984 | +0.00021 |
+| — | **Unattributed** — a submission the log never recorded | — | **0.96987** | +0.00003 |
 | 8 | Context-conditional TE / jagged categoricals — all rejected on CV | — | not submitted | — |
+| 9 | + `lgb_raw` / `lgb_enc` diversity models | 0.968727 | 0.96986 | +0.00002 |
 
 Round 3 produced more than every other round combined. Round 4 was a regression and was rolled back.
 Rounds 5, 6 and 8 spent no submissions — the questions were settled on cross-validation.
 
-**CV/LB agreement.** The offset has been stable: +0.0014 in rounds 1–2, +0.00117 at round 3. At round 7
-the paired ablation predicted +0.000224 and the leaderboard delivered +0.00021. The CV harness now
-predicts leaderboard movement in both direction and magnitude, which is worth more than any single
-round's gain — further ideas can be screened without spending submissions.
+**One submission is unattributed.** It scored 0.96987, one day after round 7 and above it, and no record
+was kept of what it changed. It is the best score on the board and nothing in this log explains it. That
+is the failure mode this whole document exists to prevent, so it is recorded as a gap rather than quietly
+folded into round 7.
+
+**CV/LB agreement.** The offset has been stable everywhere both numbers were recorded:
+
+| Round | blend OOF | LB | offset |
+|---|---|---|---|
+| 3 | 0.968456 | 0.96963 | +0.00117 |
+| 9 | 0.968727 | 0.96986 | +0.00113 |
+
+At round 7 the paired ablation predicted +0.000224 and the leaderboard delivered +0.00021. The harness now
+predicts leaderboard movement in both direction and magnitude — **including predicting nothing**, which is
+what rounds 8 and 9 measured and what the leaderboard confirmed. That is worth more than any single
+round's gain: ideas can be screened without spending submissions.
+
+Working backwards through the offset puts round 7's blend at roughly 0.96869 OOF, which makes round 9's
+five-model blend about +0.00004 better — the same figure the blend-versus-best-single comparison gives
+from the other direction (§6).
 
 ---
 
@@ -262,54 +281,90 @@ load → EDA → feature engineering → constraint imputation → target + freq
 - **Round 3 model detail:** LightGBM 0.968094, XGBoost 0.968265, CatBoost 0.968071, blend 0.968456 at
   weights 0.22 / 0.44 / 0.34.
 
-### The ensemble is barely contributing
+### Round 9: the ensemble cannot be fixed, and now we know why
 
-OOF correlations between the three models are **0.9961–0.9976**. They make the same mistakes, so the
-blend has beaten the best single model by at most 0.0002 in every round, and all blend variants
-(probability/rank × mean/optimised) have landed within 0.00001 of each other.
+OOF correlations between the three main models are **0.9961–0.9976**. They make the same mistakes, so
+the blend had never beaten the best single model by more than 0.0002. Round 9 tested whether two
+**feature-set split** models could break that — `lgb_raw` (44 features: raw, engineered and constraint
+columns, encodings removed) and `lgb_enc` (21: target and frequency encodings only).
 
-Two **feature-set split** models now target that directly: `lgb_raw` (44 features — raw, engineered and
-constraint columns, encodings removed) and `lgb_enc` (21 — target and frequency encodings only). Section
-3b measured the encodings at +0.0025, so removing them does not re-tune the same function, it fits a
-different one to a different view of the data. Both are expected to score worse alone; the criterion is
-the correlation they print, and anything under ~0.99 gives the Ridge meta-learner something real to work
-with. There is no downside risk: the blend cell scores every single model as its own candidate and picks
-by OOF AUC, so a useless diversity model can only fail to help.
+| Model | OOF AUC | vs lgb | vs xgb | vs cat |
+|---|---|---|---|---|
+| `lgb` | 0.968324 | — | 0.9975 | 0.9960 |
+| `xgb` | **0.968487** | 0.9975 | — | 0.9963 |
+| `cat` | 0.968258 | 0.9960 | 0.9963 | — |
+| `lgb_raw` | 0.964924 | **0.9816** | **0.9820** | **0.9821** |
+| `lgb_enc` | 0.963759 | **0.9800** | **0.9799** | **0.9801** |
 
-`RUN_LGB_ET` is off by default. It was never measured, so this is a judgement call rather than a recorded
-rejection — it varies the algorithm while holding the features fixed, which is the weaker cut here, and
-running all three diversity models would put a full pass past five hours.
+**The decorrelation worked exactly as designed.** Both landed at 0.980–0.982 against the main three and
+0.9647 against each other, while the main three did not move. The blend used them rather than zeroing
+them out — simplex weights 0.094 for `lgb_raw` and 0.015 for `lgb_enc`.
+
+**It bought nothing.** The blend reached 0.968727 against a best single model of 0.968487, an edge of
++0.000240 — against +0.000191 for the three-model blend in round 3. Two genuinely decorrelated models
+moved the blend's edge by +0.00005, and the leaderboard delivered +0.00002.
+
+The reason is structural, and it closes the direction:
+
+> The encodings **are** the signal (+0.0025 in the 3b ablation). Any model that holds them correlates
+> ~0.996 with the others; any model that drops them is ~0.004 weaker. There is no middle.
+
+Decorrelation is necessary for a blend to gain, but it is not sufficient — the diversity has to be cheap,
+and in this dataset it cannot be. At ρ = 0.98 only ~2% of a model's variance is its own, and here that 2%
+arrives attached to a 0.0036–0.0047 accuracy deficit.
+
+**The meta-learner closed along with it.** Ridge coefficients came out all-positive and essentially
+identical to the simplex solution:
+
+```
+ridge      lgb 0.1905  xgb 0.3855  cat 0.3033  lgb_raw 0.1092  lgb_enc 0.0162
+simplex    lgb 0.1968  xgb 0.4063  cat 0.2877  lgb_raw 0.0937  lgb_enc 0.0154
+```
+
+The entire argument for Ridge over simplex weights was that negative coefficients let the combiner cancel
+shared error instead of only averaging. With no opposing error to cancel, it rediscovered the convex
+combination — and `ridge_prob` (0.968716) scored *below* `prob_optimized` (0.968722).
+
+The top four candidates sit within 0.00001 of each other (`rank_optimized` 0.968727, `prob_optimized`
+0.968722, `ridge_prob` 0.968716, `ridge_rank` 0.968632). Which one the cell selects is not meaningful.
+
+Both diversity models are **kept** despite the near-zero gain, by the same rule that keeps the zero-effect
+features: moving a known-good configuration on a noise-level difference is what caused round 4. They cost
+~20 minutes; `RUN_DIVERSITY = False` skips them while iterating on something else.
+
+`RUN_LGB_ET` stays off. It was never measured, so this is a judgement call rather than a recorded
+rejection — it varies the algorithm while holding the features fixed, and round 9 showed that even a much
+sharper cut along the feature axis buys nothing.
 
 ---
 
 ## 7. Open items, ranked
 
-Feature engineering is finished — §5b closed the last open encoding family by testing it. Everything
-below is model-side.
+Feature engineering closed in round 8 (§5b). Stacking closed in round 9 (§6). Two items remain live and
+both are worth roughly +0.0002.
 
-1. **Diversity for the blend** — *implemented, not yet run.* `lgb_raw` and `lgb_enc` are in section 4
-   behind `RUN_DIVERSITY`; see §6. Read the correlation printout before judging them by AUC.
-2. **Meta-learner blending** (`ridge_prob`, `ridge_rank`, `logit_prob`) — already staged in the blend
-   cell. Taken from a higher-scoring public solution that stacks with a Ridge instead of simplex weights:
-   coefficients may be negative, so the combiner can cancel shared error rather than only average, and it
-   fits squared error rather than maximising AUC directly. Fitted fold-wise. Only worth its keep once (1)
-   has lowered the correlations.
-3. **Targeted hyperparameter sweep before opening Optuna.** The TE columns are jagged, so `num_leaves=64`
+1. **Targeted hyperparameter sweep before opening Optuna.** The TE columns are jagged, so `num_leaves=64`
    with `min_child_samples=60` may be clipping their resolution. Sweep `num_leaves ∈ {64, 128, 256}` ×
    `min_child_samples ∈ {20, 60, 150}` at 3 folds first, and open a full Optuna run on XGBoost only if
-   that axis shows signal.
-4. **Multi-seed bagging.** Mechanical, reliable, roughly +0.0002, costs runtime linearly.
-5. **Nested target encoding.** The encoding and the CV share folds, so training rows carry encodings
+   that axis shows signal. XGBoost is where any gain should be spent: it is both the best single model
+   (0.968487) and the largest blend weight (0.40), so port the direction there via `max_depth` /
+   `min_child_weight` once LightGBM says whether the axis is live at all.
+2. **Multi-seed bagging.** Mechanical, reliable, roughly +0.0002, costs runtime linearly.
+3. **Nested target encoding.** The encoding and the CV share folds, so training rows carry encodings
    fitted on tables that include the validation fold. The effect is diluted and CV/LB have agreed at
    every round, so this is a correctness cleanup rather than an expected gain.
-6. **Original dataset augmentation** — demoted. The usual rationale is extra support for the encoding
+4. **Original dataset augmentation** — demoted. The usual rationale is extra support for the encoding
    tables in thin regions, and the coverage check in §4 found no thin regions: under 0.01% of test
    rows carry a value unseen in train.
 
-Note on that public solution: its notebook computes almost nothing itself. It reads pre-computed OOF and
-test prediction matrices from a separate data-collation notebook and fits a single Ridge on top. The
-score comes from stacking many diverse models, not from a feature trick — so the transferable idea is
-the meta-learner, and more importantly the diversity that makes one worth having.
+**Closed, with the evidence:** diversity for the blend and meta-learner stacking, both in §6. The public
+solution that suggested them stacks many diverse models and fits a single Ridge on top of pre-computed OOF
+matrices. That works where the base models are diverse *and* comparable in strength; here they cannot be
+both at once, and the Ridge reduced to the simplex weights we already had.
+
+The one door left open on that axis is a model with a genuinely different functional form that still holds
+the full feature set — a neural net with embeddings over the exact-value columns would be the candidate,
+strong *and* decorrelated. At this plateau it is a large build for an uncertain return.
 
 ---
 
@@ -327,8 +382,10 @@ Paths are relative to the notebook directory. Two long stages:
    Currently `RUN_ABLATION = False`; the round 8 result is recorded in the cell comment. Set it to `True`
    to screen a new feature set, then set `ADOPT_CTX` / `ADOPT_JAGGED_CAT` at the bottom of that cell.
    Both are off, which reproduces the round 7 configuration exactly.
-2. **Section 4 training** (~4–5 hours with the two diversity models, 3–4 without). `RUN_CATBOOST`,
-   `RUN_DIVERSITY` and `RUN_LGB_ET` each gate a stage. If `ADOPT_JAGGED_CAT = True`, CatBoost switches on
+2. **Section 4 training.** The "3–4 hours" figure carried in earlier revisions is **unverified and
+   probably stale** — at 10 folds LightGBM measured 10 min 45 s wall and the two diversity models 20 min
+   together on the round 9 pass. Re-measure the total on the next full run and replace this note.
+   `RUN_CATBOOST`, `RUN_DIVERSITY` and `RUN_LGB_ET` each gate a stage. If `ADOPT_JAGGED_CAT = True`, CatBoost switches on
    combination CTRs and gets noticeably slower — check the per-fold timings before committing to all 10
    folds.
 
@@ -359,6 +416,11 @@ writes only that one file.
   it reached the same verdict, which is the only way that verdict was ever going to be worth relying on.
 - Structure verified in the data is not the same as a gain from a feature encoding it. Trees build
   interactions natively; an explicit interaction feature only pays where they cannot.
+- Decorrelation is necessary for a blend to gain, but it is not sufficient: the diversity has to be cheap.
+  A model 0.98-correlated contributes ~2% of its own variance, which cannot pay for a 0.004 accuracy
+  deficit. Check what the diversity *costs* before building it, not only whether it works.
+- A meta-learner only beats optimised simplex weights when there is opposing error to cancel. All-positive
+  Ridge coefficients that match the simplex solution are the signal that there is not.
 - In-fold categorical splits on a high-cardinality column are an in-fold target statistic. Where a
   properly out-of-fold encoding of the same column already exists, adding them cost 0.0012.
 - Know the instrument's resolution. Once an effect sits at the edge of both the fold test and the row
