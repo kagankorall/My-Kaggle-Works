@@ -13,7 +13,8 @@ what moved the score, what was rejected, and where the remaining bottlenecks are
   neural network whose predictions the main notebook loads).
 
 **Best public LB: round 13, 0.96187**, a fixed ½ + ½ average of our meta-stack and the public 0.96188 stack (no CV
-possible for it). **Best by CV: round 11, public LB 0.96185** (nested CV 0.962224): a meta-stack of 227 public OOF members plus 17 of
+possible for it). **Best by CV: round 14, nested CV 0.962234** (public LB 0.96184): the round 11 stack with a
+LightGBM stacker blended in. Round 11 itself: nested CV 0.962224, public LB 0.96185: a meta-stack of 227 public OOF members plus 17 of
 ours that were never published. **Best from our own models alone: round 9, public LB 0.96102** (OOF 0.961496).
 Over eleven rounds the public LB went from 0.95851 to 0.96185 (+0.00334). Two steps carried most of it: the exact-value encodings of round 3 (+0.00170) and
 the RealMLP of round 8 (+0.00029).
@@ -37,6 +38,8 @@ the RealMLP of round 8 (+0.00029).
 | 11 | Meta-stack on Kaggle: LR (C = 0.003) on the logits of 227 public OOF members + our 17 unpublished ones | **0.962224** (nested) | **0.96185** | **+0.00083** |
 | 12 | Five new all-categorical CatBoosts (Kaggle GPU) screened in the meta-stack: best +0.000001, not adopted, not submitted | 0.962224 (nested) | — | — |
 | 13 | Twin: ½ our meta-stack (now 248 members; golem's 4 new ones change nested CV by −0.000004) + ½ nina2025's `0.96188.csv` (ewtherka's stack), percentile ranks, weight fixed in advance | — (test-only half) | 0.96187 | +0.00002 |
+| 14 | Meta-stack with a LightGBM stacker blended in: 0.8 × LR + 0.2 × LightGBM on the same logits (section 2c), 248 members | **0.962234** (nested) | 0.96184 | −0.00001 vs round 11 |
+| 15 | Twin of round 14: ½ that stack + ½ nina2025's `0.96188.csv`, percentile ranks | — (test-only half) | 0.96186 | — |
 
 **CV / LB agreement**
 
@@ -52,6 +55,7 @@ the RealMLP of round 8 (+0.00029).
 | 8 | +0.00020 | +0.00029 | −0.00049 |
 | 9 | +0.00001 | +0.00002 | −0.00048 |
 | 11 | (meta-stack, nested CV) | +0.00083 | −0.00037 |
+| 14 | +0.00001 (nested, vs round 11) | −0.00001 | −0.00039 |
 
 The public LB has sat 0.0005–0.0006 below OOF in every submission, and every OOF gain has shown up on the
 leaderboard at roughly its own size. Gains below about 0.0003 are within the public LB's noise (section 6), so CV
@@ -193,8 +197,10 @@ and GPT-2 as classifiers (all weak).
   transfer here, so expectations are modest.
 - **Does 10-fold help on test?** goodpjw2008 measured +0.00012 in CV but no test gain; our round 5 LB gain is
   below the public LB's resolution.
-- **Final selection** (two submissions): round 11 (the meta-stack, highest CV and LB) and round 9 (the best from
-  our own models alone, which does not depend on public members).
+- **Final selection** (two submissions, ticked by hand: unticked, Kaggle takes the two best public scores):
+  round 14 (`submission.csv` of meta-stack Version 6, the highest nested CV) and round 13 (the Version 5 twin,
+  public 0.96187). The round 13 twin is chosen over round 15 because it differs more from round 14 (plain LR half,
+  no LightGBM), so the pair covers more ground on the private board.
 - **Kaggle notebook** (`notebook/kaggle_s6e10_airline_satisfaction.ipynb`): Version 1 committed on Kaggle (GPU T4 x2),
   public LB **0.96091**. All five models on one 5-fold split, CatBoost on GPU, RealMLP with `n_ens` 8 and one seed;
   0.00011 below the local pipeline, within the public LB's noise. Open: make it public, post a discussion topic.
@@ -336,8 +342,8 @@ The two all-categorical CatBoosts carry our 17, so five more variants were train
 
 ### 11.2 The 0.96187 – 0.96188 notebooks (reviewed 2026-10-14)
 
-Four new public notebooks claim LB 0.96187 – 0.96188 (`other notebooks/`; the earlier five moved to
-`other notebooks/2026-10-11/`). None of them gets there with a model of its own:
+Four new public notebooks claim LB 0.96187 – 0.96188 (`other notebooks/2026-10-14/`, with the two
+source stacks; the earlier five are in `other notebooks/2026-10-11/`). None of them gets there with a model of its own:
 
 | notebook | what its submission is |
 |---|---|
@@ -390,3 +396,26 @@ full-size fold per GPU:
   is 0.0006 – 0.0012 below. The pool already holds 16 TabPFN members; goodpjw2008's limited-context TabPFN
   (OOF 0.95978) moved their stack by −2.5 × 1e-6 ("the niche was already occupied").
 - Decision pending: the full run costs 7 GPU hours for a member that is expected to add about nothing.
+
+### 11.4 The 0.96197 – 0.96204 notebooks (reviewed 2026-10-19, `other notebooks/2026-10-19/`)
+
+Nine new notebooks; **none brings a new OOF member.** The public top climbed 0.96188 → 0.96204 with test-only files:
+
+- **LB-surface ascent** (mayankraaz, rabari9999 "rank 6" 0.96201, the surface probes, the 0.96203 "measured
+  notebook"): a quadratic model of public score fitted over 60 – 96 scored files, then climbed. Public-LB tuning by
+  construction; the authors say so themselves.
+- **Copies and consensus files** (hanifnoerrofiq's `agentic-ensemble` copies a `latest_result.csv` with no code;
+  the 0.96204 audit reproduces it; the 0.96201 consensus and nina2025's h-blend 7 rank-average the above).
+- **goodpjw2008's 0.96197 (the useful one):** the 0.96190 – 0.96193 chain is an extrapolation along one axis,
+  ewtherka's plain-LR file minus his 0.8 LR + 0.2 LightGBM-stacker file, i.e. *removing* the LightGBM stacker, pushed
+  1.5× past zero. Rebuilt on the 182-member OOF pool, that direction **loses** nested CV at every strength
+  (−13 × 1e-6 at 0.1, −933 × 1e-6 at 1.5, 0/5 folds), and the opposite direction **gains** (+7.6 to +10.6 × 1e-6,
+  5/5 folds) while the public LB moves down (0.96198 → 0.96196). The public 20% and the 700k-row CV disagree in
+  both directions on this axis: the public top is likely to reshuffle on the private board.
+- **Taken from it:** the LightGBM-stacker blend, now section 2c of the meta-stack (LightGBM on the same logits, out
+  of fold on the meta folds, shares 0.1 / 0.2 / 0.3 screened under the `MIN_GAIN` rule). Three independent
+  measurements (yeashusemwal, goodpjw2008 Part 9 and 10-19) found +8 to +11 × 1e-6 on 5 of 5 folds. Expect the
+  public LB not to show it.
+- **Result (round 14):** LR 0.962219, LightGBM stacker alone 0.962035 (iterations 210 – 519), share 0.2 adopted:
+  **nested CV 0.962234 (+0.000015)**, our best. Public LB 0.96184, one digit below round 11's 0.96185: the same
+  direction goodpjw2008 saw. Its twin with `0.96188.csv` (rank correlation 0.999473) scored 0.96186.
