@@ -1,0 +1,11 @@
+.DS_Store
+
+# Credit Card Fraud (S6E11): large or private files, never push
+Playground Series - Credit Card Fraud Prediction/data/
+Playground Series - Credit Card Fraud Prediction/preds/
+Playground Series - Credit Card Fraud Prediction/public_preds/
+Playground Series - Credit Card Fraud Prediction/submissions/
+
+# Until the competition ends (~2026-12-01): keep the whole folder private.
+# After the deadline, delete the next line and commit the notebooks + MODELING_SUMMARY.md.
+Playground Series - Credit Card Fraud Prediction/

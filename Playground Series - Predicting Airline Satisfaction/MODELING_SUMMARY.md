@@ -12,7 +12,7 @@ what moved the score, what was rejected, and where the remaining bottlenecks are
   (features, tree models, blend, submission) and [`notebook/realmlp.ipynb`](notebook/realmlp.ipynb) (a RealMLP
   neural network whose predictions the main notebook loads).
 
-**Best public LB: round 13, 0.96187**, a fixed ½ + ½ average of our meta-stack and the public 0.96188 stack (no CV
+**Final result (private LB, 2026-11-01): 0.96237**, the better of our two picks (section 11.7). **Best public LB: round 16, 0.96203**, a fixed ½ + ½ average of our CV stack and the public 0.96213 file (no CV
 possible for it). **Best by CV: round 14, nested CV 0.962234** (public LB 0.96184): the round 11 stack with a
 LightGBM stacker blended in. Round 11 itself: nested CV 0.962224, public LB 0.96185: a meta-stack of 227 public OOF members plus 17 of
 ours that were never published. **Best from our own models alone: round 9, public LB 0.96102** (OOF 0.961496).
@@ -40,6 +40,7 @@ the RealMLP of round 8 (+0.00029).
 | 13 | Twin: ½ our meta-stack (now 248 members; golem's 4 new ones change nested CV by −0.000004) + ½ nina2025's `0.96188.csv` (ewtherka's stack), percentile ranks, weight fixed in advance | — (test-only half) | 0.96187 | +0.00002 |
 | 14 | Meta-stack with a LightGBM stacker blended in: 0.8 × LR + 0.2 × LightGBM on the same logits (section 2c), 248 members | **0.962234** (nested) | 0.96184 | −0.00001 vs round 11 |
 | 15 | Twin of round 14: ½ that stack + ½ nina2025's `0.96188.csv`, percentile ranks | — (test-only half) | 0.96186 | — |
+| 16 | Final blend B: ½ round 14 + ½ the public 0.96213 file, percentile ranks, weight fixed in advance (rank-difference std s = 0.02639, expected blend gain 0.082 × s² = 5.7e-5) | — (test-only half) | **0.96203** | +0.00016 vs round 14 |
 
 **CV / LB agreement**
 
@@ -198,9 +199,8 @@ and GPT-2 as classifiers (all weak).
 - **Does 10-fold help on test?** goodpjw2008 measured +0.00012 in CV but no test gain; our round 5 LB gain is
   below the public LB's resolution.
 - **Final selection** (two submissions, ticked by hand: unticked, Kaggle takes the two best public scores):
-  round 14 (`submission.csv` of meta-stack Version 6, the highest nested CV) and round 13 (the Version 5 twin,
-  public 0.96187). The round 13 twin is chosen over round 15 because it differs more from round 14 (plain LR half,
-  no LightGBM), so the pair covers more ground on the private board.
+  round 14 (`submission.csv` of meta-stack Version 6, the highest nested CV, public 0.96184) and round 16 (the final
+  blend B, public 0.96203; section 11.5). B replaced the round 13 twin on 10-28.
 - **Kaggle notebook** (`notebook/kaggle_s6e10_airline_satisfaction.ipynb`): Version 1 committed on Kaggle (GPU T4 x2),
   public LB **0.96091**. All five models on one 5-fold split, CatBoost on GPU, RealMLP with `n_ens` 8 and one seed;
   0.00011 below the local pipeline, within the public LB's noise. Open: make it public, post a discussion topic.
@@ -419,3 +419,85 @@ Nine new notebooks; **none brings a new OOF member.** The public top climbed 0.9
 - **Result (round 14):** LR 0.962219, LightGBM stacker alone 0.962035 (iterations 210 – 519), share 0.2 adopted:
   **nested CV 0.962234 (+0.000015)**, our best. Public LB 0.96184, one digit below round 11's 0.96185: the same
   direction goodpjw2008 saw. Its twin with `0.96188.csv` (rank correlation 0.999473) scored 0.96186.
+
+### 11.5 The 0.96208 – 0.96213 notebooks and the final pick (reviewed 2026-10-28, `other notebooks/2026-10-28/`)
+
+- **Still no new model behind the public top.** The 0.96213 file is mehrankazeminia's one line,
+  `0.10 × TabPFN probability + 0.90 × a 0.96210 rank file`; adding a probability to a rank re-orders only the
+  uncertain middle. goodpjw2008 measured the same injection in nested CV: it loses at every strength (−1.7 to −39
+  × 1e-6), and on the public board the file sits on a summit (every move away from it scores lower). The 0.96206 –
+  0.96210 files are LB-surface steps. goodpjw2008's map (10-27): the 18 top public files are three near-copies
+  (private sd between any two ≤ 1.2e-5); the CV stacks are the only clearly different bet.
+- **The real top of the board is out of reach:** 0.96427, 0.96352 and 0.96276 (Kawamata, Altunok, Robertson) have
+  no public notebook; the 0.96276-titled notebook outputs 92% of the 0.96213 file.
+- **goodpjw2008's two rules (measured):** the public board blurs a score gap by sd ≈ 0.003 × std(percentile-rank
+  difference), the private 80% by ≈ 0.0012 ×; and a 50/50 rank blend of two files scores ≈ 0.082 × s² above the
+  average of the two (seven pre-registered submissions). In their climb replay on OOF rows, each public step after the
+  real information is spent gains +2e-5 public and loses 1.4e-5 private.
+- **Our final two, revised:** keep round 14 (CV stack) as pick 1, and replace the round 13 twin with
+  B = 50% round 14 + 50% the public 0.96213 file (`notebook/kaggle_s6e10_final_blend.ipynb`). With s ≈ 0.02, B should
+  beat the CV stack privately unless the 0.96213 file is privately worse than it by more than about 2 × 0.082 × s²
+  (≈ 7 – 9e-5); if it is, pick 1 still holds.
+- **Result (round 16):** s = 0.02639 (rank correlation 0.995820), expected blend gain 5.7e-5, public-board noise of
+  the move ±4.0e-5; predicted public 0.96199 + 0.00006 ≈ 0.96204, **scored 0.96203**. B now beats the CV stack
+  privately unless the 0.96213 file is privately worse than it by more than about 11e-5.
+
+### 11.6 The 0.96219 – 0.96225 notebooks (reviewed 2026-10-31, last day)
+
+Four notebooks, none with a model, an OOF or a CV claim:
+
+- **Mirror Nudge Climb III (0.96219, mayankraaz):** after re-mixing the TabPFN layer of the 0.96213 file, adds small
+  random noise to one random block of test rows, submits the `+` and the `−` version, and keeps whichever the public
+  board ranks higher; eleven such pairs. The author's own warning: the nudges carry no real signal and should cost a
+  little on the private 80%. This is fitting noise to the public 20% by construction.
+- **Endgame "less is more" (0.96225, areebbb):** tkms0816's 0.96223 file + 1.75 × (Mirror Nudge Climb III − Mirror
+  Pair Climb), with the step chosen by public probes, i.e. an extrapolation of the nudges above.
+- **PAS E51:** a 0.25% LightGBM correction on that file, "better" only in the unrounded public score.
+- **XWC V11:** a byte-for-byte export of a supplied CSV.
+
+Nothing to adopt; the final picks of section 11.5 stand.
+
+### 11.7 Final result (2026-11-01)
+
+**Private LB 0.96237**, from pick 1 (round 14, the CV stack). Every submission's private score:
+
+| round | file | nested CV / OOF | public | **private** | private − public | final pick |
+|---|---|---|---|---|---|---|
+| 6 | all-categorical CatBoost added | 0.961235 | 0.96068 | 0.96150 | +0.00082 | |
+| 7 | all-categorical CatBoost, no own TE | 0.961290 | 0.96071 | 0.96152 | +0.00081 | |
+| 8 | + RealMLP | 0.961487 | 0.96100 | 0.96179 | +0.00079 | |
+| 9 | RealMLP, two seeds (best own models) | 0.961496 | 0.96102 | 0.96180 | +0.00078 | |
+| — | public Kaggle notebook (Encodings + CatBoost + RealMLP) | — | 0.96091 | 0.96175 | +0.00084 | |
+| 11 | meta-stack, LR | 0.962224 | 0.96185 | 0.96237 | +0.00052 | |
+| 13 | twin: LR stack + ½ ewtherka's 0.96188 | — | 0.96187 | **0.96238** | +0.00051 | (until 10-28) |
+| 14 | meta-stack, 0.8 LR + 0.2 LightGBM | **0.962234** | 0.96184 | **0.96237** | +0.00053 | **pick 1** |
+| 15 | twin of round 14 + ½ ewtherka's 0.96188 | — | 0.96186 | **0.96238** | +0.00052 | |
+| 16 | blend B: ½ round 14 + ½ the public 0.96213 file | — | 0.96203 | 0.96235 | +0.00032 | pick 2 |
+
+What it says:
+
+- **CV ranked everything correctly.** Own models < public notebook < meta-stacks on the private board, in the same
+  order and roughly the same steps as CV. The meta-stack is worth +0.00057 private over our best own models (+0.00083
+  public).
+- **The public split was the hard one.** Private sat 0.0005 – 0.0008 above public for every file, and 0.00014 above
+  nested CV for the stacks: decisions taken on CV were unaffected by it.
+- **The public #1 gave its lead back.** From B = ½ CV + ½ P scoring 0.96235 and the 0.082 × s² rule (s = 0.0264), the
+  public 0.96213 file comes out at about **0.9622 private**, roughly 0.00015 below our CV stack (± ~1.5e-5 from
+  rounding). That is beyond the 11e-5 break-even of section 11.5, so B lost to the CV stack (0.96235 vs 0.96237):
+  the blend paid its full blend gain but the public-max half was too LB-overfit. The +0.00010 public lead of the top
+  public files over the CV stacks turned into a ~0.00015 private deficit.
+- **The twins of CV stacks did best (0.96238).** Keeping the round 13 twin as pick 2 would have given 0.96238
+  instead of 0.96237, one digit, inside the private noise between near-copies.
+- **The LightGBM-stacker blend (+0.00001 CV) is invisible on private** (round 11 and round 14 both 0.96237), as the
+  noise rule predicted for a gain that small.
+
+### 11.8 What won (1st-place writeup, read 2026-11-01)
+
+The data was generated by GReaT (GPT-2 fine-tuned on the original survey, rows written `"column is value"` in random
+order, label sampled first). The winners fine-tuned GPT-2 the same way and used it as a **target-first classifier**
+("the Storyteller"): score each row's feature tokens given `satisfaction is True` and given `False`, turn the two
+log-likelihoods into log-odds with Bayes' rule, average over 30 random feature orders. One such model: OOF 0.96242,
+public 0.96189 on its own (as much as the whole 245-pair public stack); added to the 245 public pairs it moved CV
+0.96218 → 0.96266 and public 0.96186 → 0.96223; ten GPT variants took them to CV 0.96290 / public 0.96262.
+That model family was the gap between the public stacks (0.9621 – 0.9622 public) and the top of the board. Details
+and costs: memory note `playground-great-storyteller`.
